@@ -1,0 +1,32 @@
+name: Slack PR Push Notify
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+concurrency:
+  group: pr-push-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  notify:
+    if: >-
+      !contains(fromJSON('["bmahsang","bmhayoung"]'), github.event.pull_request.user.login)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Send Slack notification
+        env:
+          SLACK_WEBHOOK: ${{ secrets.SLACK_DEPLOY_WEBHOOK_URL }}
+        run: |
+          MESSAGE=$(cat <<EOFMSG
+          🔄 ${{ github.event.repository.name }} / ${{ github.event.pull_request.head.ref }}
+          변경 내역:
+          • #${{ github.event.pull_request.number }} ${{ github.event.pull_request.title }} (@${{ github.event.pull_request.user.login }})
+
+          🔗 <${{ github.event.pull_request.html_url }}|PR 보기>
+          EOFMSG
+          )
+          PAYLOAD=$(jq -n --arg text "$MESSAGE" '{text: $text}')
+          curl -X POST -H 'Content-type: application/json' \
+            --data "$PAYLOAD" \
+            "$SLACK_WEBHOOK"

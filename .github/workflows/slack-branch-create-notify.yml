@@ -1,0 +1,27 @@
+name: Slack Branch Create Notify
+
+on:
+  create:
+
+jobs:
+  notify:
+    if: >-
+      github.event.ref_type == 'branch' &&
+      !contains(fromJSON('["main","master","develop"]'), github.event.ref) &&
+      !contains(fromJSON('["bmahsang","bmhayoung"]'), github.actor)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Send Slack notification
+        env:
+          SLACK_WEBHOOK: ${{ secrets.SLACK_DEPLOY_WEBHOOK_URL }}
+        run: |
+          MESSAGE=$(cat <<EOFMSG
+          🌱 브랜치 생성 — ${{ github.event.repository.name }} / ${{ github.event.ref }}
+          👤 @${{ github.actor }}
+          🔗 <https://github.com/${{ github.repository }}/tree/${{ github.event.ref }}|GitHub에서 보기>
+          EOFMSG
+          )
+          PAYLOAD=$(jq -n --arg text "$MESSAGE" '{text: $text}')
+          curl -X POST -H 'Content-type: application/json' \
+            --data "$PAYLOAD" \
+            "$SLACK_WEBHOOK"
