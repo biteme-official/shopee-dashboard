@@ -10,23 +10,23 @@ concurrency:
 
 jobs:
   notify:
-    if: >-
-      !contains(fromJSON('["bmahsang","bmhayoung"]'), github.event.pull_request.user.login)
     runs-on: ubuntu-latest
+    if: ${{ !contains(fromJSON('["bmahsang", "bmhayoung"]'), github.event.pull_request.user.login) }}
     steps:
       - name: Send Slack notification
         env:
-          SLACK_WEBHOOK: ${{ secrets.SLACK_DEPLOY_WEBHOOK_URL }}
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_DEPLOY_WEBHOOK_URL }}
         run: |
-          MESSAGE=$(cat <<EOFMSG
-          🔄 ${{ github.event.repository.name }} / ${{ github.event.pull_request.head.ref }}
-          변경 내역:
-          • #${{ github.event.pull_request.number }} ${{ github.event.pull_request.title }} (@${{ github.event.pull_request.user.login }})
+          REPO="${{ github.event.repository.name }}"
+          BRANCH="${{ github.event.pull_request.head.ref }}"
+          PR_NUMBER="${{ github.event.pull_request.number }}"
+          PR_TITLE="${{ github.event.pull_request.title }}"
+          PR_AUTHOR="${{ github.event.pull_request.user.login }}"
+          PR_URL="${{ github.event.pull_request.html_url }}"
 
-          🔗 <${{ github.event.pull_request.html_url }}|PR 보기>
-          EOFMSG
-          )
+          MESSAGE="$(printf '🔄 %s / %s\n변경 내역:\n• #%s %s (@%s)\n\n🔗 %s' "$REPO" "$BRANCH" "$PR_NUMBER" "$PR_TITLE" "$PR_AUTHOR" "$PR_URL")"
+
           PAYLOAD=$(jq -n --arg text "$MESSAGE" '{text: $text}')
-          curl -X POST -H 'Content-type: application/json' \
+          curl -s -X POST -H 'Content-type: application/json' \
             --data "$PAYLOAD" \
-            "$SLACK_WEBHOOK"
+            "$SLACK_WEBHOOK_URL"
