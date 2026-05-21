@@ -1,0 +1,18 @@
+# Secrets
+config.py
+shopee_tokens.json
+.env
+
+# Output data
+output/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+
+# IDE
+.vscode/
+.idea/
