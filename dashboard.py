@@ -532,7 +532,7 @@ canvas{{max-height:260px}}
 <div class="container">
   <!-- TABS -->
   <div class="tabs">
-    <button class="tab-btn active" onclick="switchTab('dashboard',this)">대시보드</button>
+    <button class="tab-btn active" onclick="switchTab('dashboard',this)">대시보드2</button>
     <button class="tab-btn" onclick="switchTab('funnel',this)">퍼널 분석</button>
     <button class="tab-btn" onclick="switchTab('members',this)">회원 분석</button>
   </div>
