@@ -688,11 +688,21 @@ const PAL = ['#EE4D2D','#fb8c5a','#fdb997','#94a3b8','#cbd5e1','#3b82f6','#10b98
 const fmt = n => new Intl.NumberFormat('ko-KR').format(n);
 const fmtW = n => '\\u20A9' + fmt(n);
 
+function getTodayKST() {{
+  const kst = new Date(Date.now() + 9 * 60 * 60 * 1000);
+  return kst.toISOString().slice(0, 10);
+}}
+
 function getDateRange() {{
   if (currentDays === -1 && window._customFrom && window._customTo)
     return {{ from: window._customFrom, to: window._customTo }};
   if (currentDays === 0) return null;
-  const cutoff = new Date(); cutoff.setDate(cutoff.getDate() - currentDays);
+  if (currentDays === 1) {{
+    const today = getTodayKST();
+    return {{ from: today, to: today }};
+  }}
+  const cutoff = new Date(Date.now() + 9 * 60 * 60 * 1000);
+  cutoff.setDate(cutoff.getDate() - currentDays);
   return {{ from: cutoff.toISOString().slice(0,10), to: '9999-12-31' }};
 }}
 
@@ -781,22 +791,49 @@ function renderKPI() {{
 }}
 
 function renderTimelineChart() {{
-  const tl = getFilteredTimeline();
   destroyChart('timeline');
-  charts.timeline = new Chart(document.getElementById('timelineChart'), {{
-    type: 'bar',
-    data: {{
-      labels: tl.map(d => d.date.slice(5)),
-      datasets: [
-        {{ label: '매출', data: tl.map(d => d.revenue), backgroundColor: BRAND+'b3', borderRadius: 3, yAxisID: 'y', order: 2 }},
-        {{ label: '주문수', data: tl.map(d => d.orders), type: 'line', borderColor: '#94a3b8', pointRadius: 2, tension: .3, yAxisID: 'y1', order: 1 }},
-      ]
-    }},
-    options: {{ responsive:true, interaction:{{mode:'index',intersect:false}},
-      scales: {{ y:{{position:'left',ticks:{{callback:v=>fmt(v),font:{{size:10}}}}}}, y1:{{position:'right',grid:{{drawOnChartArea:false}},ticks:{{font:{{size:10}}}}}} }},
-      plugins:{{legend:{{labels:{{font:{{size:11}}}}}}}}
-    }}
-  }});
+  if (currentDays === 1) {{
+    const rows = getFilteredRows();
+    const hourly = Array.from({{length:24}}, () => ({{orders: new Set(), revenue: 0}}));
+    rows.forEach(o => {{
+      if (o.h == null) return;
+      hourly[o.h].orders.add(o.sn);
+      hourly[o.h].revenue += (o.disc || o.orig) * o.qty;
+    }});
+    const labels = Array.from({{length:24}}, (_, i) => i + '시');
+    const revData = hourly.map(h => Math.round(h.revenue));
+    const ordData = hourly.map(h => h.orders.size);
+    charts.timeline = new Chart(document.getElementById('timelineChart'), {{
+      type: 'bar',
+      data: {{
+        labels,
+        datasets: [
+          {{ label: '매출', data: revData, backgroundColor: BRAND+'b3', borderRadius: 3, yAxisID: 'y', order: 2 }},
+          {{ label: '주문수', data: ordData, type: 'line', borderColor: '#94a3b8', pointRadius: 2, tension: .3, yAxisID: 'y1', order: 1 }},
+        ]
+      }},
+      options: {{ responsive:true, interaction:{{mode:'index',intersect:false}},
+        scales: {{ y:{{position:'left',ticks:{{callback:v=>fmt(v),font:{{size:10}}}}}}, y1:{{position:'right',grid:{{drawOnChartArea:false}},ticks:{{font:{{size:10}}}}}} }},
+        plugins:{{legend:{{labels:{{font:{{size:11}}}}}}}}
+      }}
+    }});
+  }} else {{
+    const tl = getFilteredTimeline();
+    charts.timeline = new Chart(document.getElementById('timelineChart'), {{
+      type: 'bar',
+      data: {{
+        labels: tl.map(d => d.date.slice(5)),
+        datasets: [
+          {{ label: '매출', data: tl.map(d => d.revenue), backgroundColor: BRAND+'b3', borderRadius: 3, yAxisID: 'y', order: 2 }},
+          {{ label: '주문수', data: tl.map(d => d.orders), type: 'line', borderColor: '#94a3b8', pointRadius: 2, tension: .3, yAxisID: 'y1', order: 1 }},
+        ]
+      }},
+      options: {{ responsive:true, interaction:{{mode:'index',intersect:false}},
+        scales: {{ y:{{position:'left',ticks:{{callback:v=>fmt(v),font:{{size:10}}}}}}, y1:{{position:'right',grid:{{drawOnChartArea:false}},ticks:{{font:{{size:10}}}}}} }},
+        plugins:{{legend:{{labels:{{font:{{size:11}}}}}}}}
+      }}
+    }});
+  }}
 }}
 
 function renderTimelineTable() {{
