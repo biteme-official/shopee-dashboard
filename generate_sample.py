@@ -176,7 +176,7 @@ def make_snapshots():
     base_views = {e["item_id"]: e["views"] - 300 for e in ITEM_EXTRA}
     base_likes = {e["item_id"]: e["likes"] - 50 for e in ITEM_EXTRA}
     base_sale = {e["item_id"]: e["sale"] - 40 for e in ITEM_EXTRA}
-    for i in range(30):
+    for i in range(31):
         d = (NOW - timedelta(days=30 - i)).strftime("%Y-%m-%d")
         entry = {}
         for iid in base_views:
