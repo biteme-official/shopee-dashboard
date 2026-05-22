@@ -50,7 +50,7 @@ ITEM_EXTRA = [
 
 STATUSES = ["COMPLETED"] * 6 + ["SHIPPED"] * 2 + ["IN_CANCEL"] * 1 + ["TO_SHIP"] * 1
 PAYMENT_METHODS = ["ShopeePay"] * 5 + ["Credit Card"] * 3 + ["Bank Transfer"] * 2
-BUYERS = [f"buyer_{i:04d}" for i in range(1, 80)]
+BUYERS = [f"buyer_{i:04d}" for i in range(1, 300)]
 
 MODEL_WEIGHTS = {
     "111001": [0.5, 0.3, 0.2],
@@ -67,69 +67,103 @@ for m in PRODUCT_MODELS:
 RETURN_REASONS = ["Product defect", "Wrong item", "Changed mind", "Size issue", "Late delivery"]
 
 
+COHORT_MONTHS = ['2026-01', '2026-02', '2026-03', '2026-04', '2026-05']
+# 코호트월별 신규 유저 풀 (겹치지 않게 구분)
+COHORT_BUYERS = {
+    '2026-01': [f"buyer_{i:04d}" for i in range(1,   56)],
+    '2026-02': [f"buyer_{i:04d}" for i in range(56,  121)],
+    '2026-03': [f"buyer_{i:04d}" for i in range(121, 196)],
+    '2026-04': [f"buyer_{i:04d}" for i in range(196, 256)],
+    '2026-05': [f"buyer_{i:04d}" for i in range(256, 300)],
+}
+# 코호트 기준 N개월 차 재구매율
+RETENTION = [1.0, 0.31, 0.18, 0.12, 0.08]
+HOUR_WEIGHTS = [1,1,1,1,1,1,2,3,4,5,6,6,5,6,7,7,8,8,7,6,5,4,3,2]
+
+
+def random_dt_in_month(month_str):
+    year, month = int(month_str[:4]), int(month_str[5:])
+    month_start = datetime(year, month, 1, tzinfo=KST)
+    if month < 12:
+        month_end = datetime(year, month + 1, 1, tzinfo=KST) - timedelta(seconds=1)
+    else:
+        month_end = datetime(year, 12, 31, 23, 59, 59, tzinfo=KST)
+    month_end = min(month_end, NOW)
+    if month_start > NOW:
+        return None
+    delta_days = (month_end - month_start).days
+    day_offset = random.randint(0, max(0, delta_days))
+    hour = random.choices(range(24), weights=HOUR_WEIGHTS)[0]
+    return month_start + timedelta(days=day_offset, hours=hour, minutes=random.randint(0, 59))
+
+
+def make_single_order(sn_ref, buyer, order_dt):
+    product = random.choice(PRODUCTS_BASE)
+    iid = product["item_id"]
+    model = random.choices(MODELS_BY_ITEM[iid], weights=MODEL_WEIGHTS[iid])[0]
+    qty = random.choices([1, 2, 3], weights=[0.7, 0.2, 0.1])[0]
+    orig = product["price"]
+    disc_pct = random.choices([0, 5, 10, 15], weights=[0.4, 0.3, 0.2, 0.1])[0]
+    disc_price = int(orig * (1 - disc_pct / 100))
+    order_sn = f"SG{sn_ref[0]:08d}"
+    sn_ref[0] += 1
+    rev = disc_price * qty
+    commission = round(rev * 0.02)
+    service   = round(rev * 0.01)
+    txn_fee   = round(rev * 0.005)
+    order = {
+        "order_sn": order_sn, "item_id": iid,
+        "item_name": product["item_name"], "model_id": model["model_id"],
+        "model_name": model["model_name"], "model_sku": model["model_sku"],
+        "quantity": qty, "original_price": orig,
+        "discounted_price": disc_price if disc_pct > 0 else None,
+        "create_time": ts(order_dt),
+        "order_status": random.choice(STATUSES),
+        "payment_method": random.choice(PAYMENT_METHODS),
+        "buyer_username": buyer,
+    }
+    esc = {
+        "order_sn": order_sn,
+        "commission_fee": -commission, "service_fee": -service,
+        "seller_transaction_fee": -txn_fee,
+        "final_product_gst": 0, "final_shipping_gst": 0,
+        "buyer_shipping_fee": 2500, "actual_shipping_fee": -3000,
+        "shipping_rebate": 500,
+        "escrow_amount": rev - commission - service - txn_fee + 500,
+    }
+    return order, esc
+
+
 def make_orders():
     orders = []
     escrow = []
-    sn = 220001
+    sn_ref = [220001]
 
+    # 코호트별 재구매 패턴 생성 (1월~5월)
+    for cohort_month, buyers in COHORT_BUYERS.items():
+        cohort_idx = COHORT_MONTHS.index(cohort_month)
+        for buyer in buyers:
+            for offset, month in enumerate(COHORT_MONTHS[cohort_idx:]):
+                if random.random() > RETENTION[offset]:
+                    continue
+                order_dt = random_dt_in_month(month)
+                if order_dt is None:
+                    continue
+                o, e = make_single_order(sn_ref, buyer, order_dt)
+                orders.append(o)
+                escrow.append(e)
+
+    # 최근 30일 추가 유기적 주문 (일별 볼륨용)
     for day_offset in range(30, -1, -1):
         day_dt = NOW - timedelta(days=day_offset)
-        n_orders = random.randint(4, 18)
-
-        for _ in range(n_orders):
-            hour = random.choices(range(24), weights=[
-                1,1,1,1,1,1,2,3,4,5,6,6,5,6,7,7,8,8,7,6,5,4,3,2
-            ])[0]
+        for _ in range(random.randint(3, 10)):
+            hour = random.choices(range(24), weights=HOUR_WEIGHTS)[0]
             order_dt = day_dt.replace(hour=hour, minute=random.randint(0, 59))
-            product = random.choice(PRODUCTS_BASE)
-            iid = product["item_id"]
-            models_for_item = MODELS_BY_ITEM[iid]
-            weights = MODEL_WEIGHTS[iid]
-            model = random.choices(models_for_item, weights=weights)[0]
-            qty = random.choices([1, 2, 3], weights=[0.7, 0.2, 0.1])[0]
-            orig = product["price"]
-            disc_pct = random.choices([0, 5, 10, 15], weights=[0.4, 0.3, 0.2, 0.1])[0]
-            disc_price = int(orig * (1 - disc_pct / 100))
-            status = random.choice(STATUSES)
-            payment = random.choice(PAYMENT_METHODS)
-            buyer = random.choice(BUYERS)
+            o, e = make_single_order(sn_ref, random.choice(BUYERS), order_dt)
+            orders.append(o)
+            escrow.append(e)
 
-            order_sn = f"SG{sn:08d}"
-            sn += 1
-
-            orders.append({
-                "order_sn": order_sn,
-                "item_id": iid,
-                "item_name": product["item_name"],
-                "model_id": model["model_id"],
-                "model_name": model["model_name"],
-                "model_sku": model["model_sku"],
-                "quantity": qty,
-                "original_price": orig,
-                "discounted_price": disc_price if disc_pct > 0 else None,
-                "create_time": ts(order_dt),
-                "order_status": status,
-                "payment_method": payment,
-                "buyer_username": buyer,
-            })
-
-            rev = disc_price * qty
-            commission = round(rev * 0.02)
-            service = round(rev * 0.01)
-            txn_fee = round(rev * 0.005)
-            escrow.append({
-                "order_sn": order_sn,
-                "commission_fee": -commission,
-                "service_fee": -service,
-                "seller_transaction_fee": -txn_fee,
-                "final_product_gst": 0,
-                "final_shipping_gst": 0,
-                "buyer_shipping_fee": 2500,
-                "actual_shipping_fee": -3000,
-                "shipping_rebate": 500,
-                "escrow_amount": rev - commission - service - txn_fee + 500,
-            })
-
+    orders.sort(key=lambda x: x['create_time'])
     return orders, escrow
 
 
@@ -211,7 +245,7 @@ snapshots = make_snapshots()
 
 data = {
     "collected_at": NOW.strftime("%Y-%m-%d %H:%M:%S"),
-    "days_back": 30,
+    "days_back": 143,
     "products": {"base": PRODUCTS_BASE, "models": PRODUCT_MODELS},
     "orders": orders,
     "escrow": escrow,

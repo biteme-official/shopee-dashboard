@@ -656,6 +656,18 @@ canvas{{max-height:260px}}
       <div class="card"><div class="card-header"><div class="card-title">신규 vs 재구매 매출</div></div><div class="card-body"><canvas id="nrChart"></canvas></div></div>
     </div>
 
+    <div class="section-label"><span>구매 횟수별 고객 코호트</span></div>
+    <div class="grid-2" style="margin-bottom:16px">
+      <div class="card"><div class="card-header"><div class="card-title">구매횟수별 AOV / 리드타임</div></div><div class="card-body"><canvas id="cohortChart"></canvas></div></div>
+      <div class="card"><div class="card-header"><div class="card-title">세그먼트 요약</div></div><div class="card-body no-pad"><div class="scrollable" id="cohortTable"></div></div></div>
+    </div>
+
+    <div class="section-label"><span>코호트 재구매율 (Retention)</span></div>
+    <div class="card" style="margin-bottom:16px">
+      <div class="card-header"><div class="card-title">월별 코호트 리텐션 히트맵</div><div class="card-desc">첫 구매월 기준 · 색이 진할수록 재구매율 높음</div></div>
+      <div class="card-body no-pad"><div class="scrollable" id="cohortHeatmap"></div></div>
+    </div>
+
     <div class="section-label"><span>교차 구매 분석</span></div>
     <div class="grid-2" style="margin-bottom:16px">
       <div class="card">
@@ -663,8 +675,13 @@ canvas{{max-height:260px}}
         <div class="card-body no-pad"><div class="scrollable" id="crossSellTable"></div></div>
       </div>
       <div class="card">
-        <div class="card-header"><div class="card-title">Top 리피트 바이어</div></div>
-        <div class="card-body no-pad"><div class="scrollable" id="topBuyersTable"></div></div>
+        <div class="card-header"><div class="card-title">Top 리피트 바이어</div><div class="card-desc" id="buyerDetailLabel" style="color:var(--brand)"></div></div>
+        <div style="display:flex;height:260px">
+          <div style="flex:0 0 55%;border-right:1px solid var(--border);overflow-y:auto" id="topBuyersTable"></div>
+          <div style="flex:1;overflow-y:auto;padding:8px 0" id="buyerSkuDetail">
+            <div style="padding:24px 16px;color:var(--muted);font-size:12px;text-align:center">바이어를 클릭하면<br>구매 상품이 표시됩니다</div>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -1274,6 +1291,138 @@ function computeCustomer(rows) {{
   return {{total,repeat,newB,repRev:Math.round(repRev),newRev:Math.round(newRev),repRate,segs,topB:topB.slice(0,15),multiRate,crossSell}};
 }}
 
+function renderCohortChart() {{
+  const rows = RAW.order_rows;
+  const buyerOrders = new Map();
+  rows.forEach(o => {{
+    if (!o.buyer || !o.d) return;
+    if (!buyerOrders.has(o.buyer)) buyerOrders.set(o.buyer, new Map());
+    const snMap = buyerOrders.get(o.buyer);
+    if (!snMap.has(o.sn)) snMap.set(o.sn, {{date: o.d, amount: 0}});
+    snMap.get(o.sn).amount += (o.disc || o.orig) * o.qty;
+  }});
+
+  const MAX_SLOT = 5;
+  const slots = Array.from({{length: MAX_SLOT}}, () => ({{aovSum:0, aovCount:0, leadSum:0, leadCount:0}}));
+
+  buyerOrders.forEach((snMap) => {{
+    const orders = Array.from(snMap.values()).sort((a,b) => a.date.localeCompare(b.date));
+    orders.forEach((o, i) => {{
+      const idx = Math.min(i, MAX_SLOT - 1);
+      slots[idx].aovSum += o.amount;
+      slots[idx].aovCount++;
+      if (i > 0) {{
+        const days = (new Date(o.date) - new Date(orders[i-1].date)) / 86400000;
+        slots[idx].leadSum += days;
+        slots[idx].leadCount++;
+      }}
+    }});
+  }});
+
+  const xLabels  = ['1번째','2번째','3번째','4번째','5번째+'];
+  const aovData  = slots.map(s => s.aovCount ? Math.round(s.aovSum/s.aovCount) : 0);
+  const leadData = slots.map((s,i) => i===0 ? null : (s.leadCount ? +(s.leadSum/s.leadCount).toFixed(1) : null));
+
+  destroyChart('cohort');
+  charts.cohort = new Chart(document.getElementById('cohortChart'), {{
+    data: {{
+      labels: xLabels,
+      datasets: [
+        {{type:'bar',  label:'평균 AOV (₩)',    data:aovData,  backgroundColor:'#6366f1', borderRadius:6, yAxisID:'y'}},
+        {{type:'line', label:'평균 리드타임 (일)', data:leadData, borderColor:'#f59e0b', backgroundColor:'transparent', pointRadius:5, pointBackgroundColor:'#f59e0b', tension:0.3, yAxisID:'y2'}}
+      ]
+    }},
+    options:{{
+      plugins:{{
+        legend:{{position:'top',labels:{{font:{{size:11}}}}}},
+        tooltip:{{callbacks:{{label:ctx=>ctx.dataset.label+': '+(ctx.datasetIndex===0?fmtW(ctx.parsed.y):ctx.parsed.y+'일')}}}}
+      }},
+      scales:{{
+        y: {{position:'left',  title:{{display:true,text:'AOV (₩)',font:{{size:10}}}}, ticks:{{callback:v=>fmt(v),font:{{size:10}}}}}},
+        y2:{{position:'right', title:{{display:true,text:'리드타임 (일)',font:{{size:10}}}}, grid:{{drawOnChartArea:false}}, ticks:{{font:{{size:10}}}}}}
+      }}
+    }}
+  }});
+
+  let html = '<table><thead><tr><th>구매 횟수</th><th class="text-right">건수</th><th class="text-right">평균 AOV</th><th class="text-right">평균 리드타임</th></tr></thead><tbody>';
+  xLabels.forEach((label, i) => {{
+    const s = slots[i];
+    html += `<tr><td>${{label}} 구매</td><td class="text-right">${{fmt(s.aovCount)}}건</td><td class="text-right">${{s.aovCount?fmtW(Math.round(s.aovSum/s.aovCount)):'—'}}</td><td class="text-right">${{s.leadCount?(s.leadSum/s.leadCount).toFixed(1)+'일':'—'}}</td></tr>`;
+  }});
+  html += '</tbody></table>';
+  document.getElementById('cohortTable').innerHTML = html;
+}}
+
+function renderCohortHeatmap() {{
+  const rows = RAW.order_rows;
+
+  function monthDiff(a, b) {{
+    return (parseInt(a.slice(0,4)) - parseInt(b.slice(0,4))) * 12
+      + (parseInt(a.slice(5,7)) - parseInt(b.slice(5,7)));
+  }}
+
+  const buyerMonths = new Map();
+  const seen = new Set();
+  rows.forEach(o => {{
+    if (!o.buyer || !o.d) return;
+    const key = o.buyer + '|' + o.sn;
+    if (seen.has(key)) return; seen.add(key);
+    const month = o.d.slice(0, 7);
+    if (!buyerMonths.has(o.buyer)) buyerMonths.set(o.buyer, new Set());
+    buyerMonths.get(o.buyer).add(month);
+  }});
+
+  const cohortMap = new Map();
+  const cohortActivity = new Map();
+  buyerMonths.forEach((months, buyer) => {{
+    const sorted = [...months].sort();
+    const cohort = sorted[0];
+    if (!cohortMap.has(cohort)) cohortMap.set(cohort, new Set());
+    cohortMap.get(cohort).add(buyer);
+    sorted.forEach(m => {{
+      const p = monthDiff(m, cohort);
+      if (!cohortActivity.has(cohort)) cohortActivity.set(cohort, new Map());
+      if (!cohortActivity.get(cohort).has(p)) cohortActivity.get(cohort).set(p, new Set());
+      cohortActivity.get(cohort).get(p).add(buyer);
+    }});
+  }});
+
+  const cohorts = [...cohortMap.keys()].sort();
+  const maxPeriod = Math.max(...[...cohortActivity.values()].flatMap(m => [...m.keys()]));
+
+  function heatColor(pct) {{
+    if (pct === null) return 'background:#f8fafc;color:#cbd5e1';
+    const t = Math.min(pct / 40, 1);
+    const r = Math.round(238 + (99  - 238) * t);
+    const g = Math.round(77  + (102 - 77)  * t);
+    const b = Math.round(45  + (241 - 45)  * t);
+    return `background:rgb(${{r}},${{g}},${{b}});color:${{t > 0.5 ? '#fff' : '#1e293b'}}`;
+  }}
+
+  let html = `<table style="width:100%;border-collapse:collapse;font-size:12px">
+    <thead><tr>
+      <th style="padding:6px 12px;text-align:left;background:#f1f5f9;font-weight:600;white-space:nowrap">코호트</th>
+      <th style="padding:6px 12px;text-align:right;background:#f1f5f9;font-weight:600">신규</th>`;
+  for (let p = 0; p <= maxPeriod; p++)
+    html += `<th style="padding:6px 12px;text-align:center;background:#f1f5f9;font-weight:600">${{p}}M</th>`;
+  html += `</tr></thead><tbody>`;
+
+  cohorts.forEach(cohort => {{
+    const size = cohortMap.get(cohort).size;
+    const act  = cohortActivity.get(cohort) || new Map();
+    html += `<tr><td style="padding:6px 12px;font-weight:500;white-space:nowrap">${{cohort}}</td>
+      <td style="padding:6px 12px;text-align:right;color:#64748b">${{size}}명</td>`;
+    for (let p = 0; p <= maxPeriod; p++) {{
+      const pct = act.has(p) ? +(act.get(p).size / size * 100).toFixed(1) : null;
+      html += `<td style="padding:6px 12px;text-align:center;${{heatColor(pct)}}">${{pct !== null ? pct+'%' : '—'}}</td>`;
+    }}
+    html += `</tr>`;
+  }});
+
+  html += `</tbody></table>`;
+  document.getElementById('cohortHeatmap').innerHTML = html;
+}}
+
 function renderMemberKPI() {{
   const rows = getFilteredRows();
   const c = computeCustomer(rows);
@@ -1327,11 +1476,31 @@ function renderCrossSell() {{
   document.getElementById('crossSellTable').innerHTML = html;
 }}
 
+function renderBuyerDetail(buyer) {{
+  const rows = getFilteredRows().filter(o => o.buyer === buyer);
+  const skuMap = new Map();
+  rows.forEach(o => {{
+    const key = o.sku || o.name;
+    if (!skuMap.has(key)) skuMap.set(key, {{sku: o.sku, name: o.name, qty: 0, revenue: 0}});
+    const s = skuMap.get(key);
+    s.qty += o.qty;
+    s.revenue += (o.disc || o.orig) * o.qty;
+  }});
+  const skus = [...skuMap.values()].sort((a,b) => b.qty - a.qty);
+  document.getElementById('buyerDetailLabel').textContent = buyer;
+  let html = '<table><thead><tr><th>SKU</th><th>상품명</th><th class="text-right">수량</th><th class="text-right">매출</th></tr></thead><tbody>';
+  skus.forEach(s => {{
+    html += `<tr><td style="font-family:monospace;font-size:10px;color:var(--muted)">${{s.sku||'—'}}</td><td style="max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${{s.name}}</td><td class="text-right">${{s.qty}}</td><td class="text-right">${{fmtW(Math.round(s.revenue))}}</td></tr>`;
+  }});
+  html += '</tbody></table>';
+  document.getElementById('buyerSkuDetail').innerHTML = html;
+}}
+
 function renderTopBuyers() {{
   const c = computeCustomer(getFilteredRows());
-  let html = '<table><thead><tr><th>#</th><th>바이어</th><th class="text-right">주문</th><th class="text-right">수량</th><th class="text-right">매출</th></tr></thead><tbody>';
+  let html = '<table><thead><tr><th>#</th><th>바이어</th><th class="text-right">주문</th><th class="text-right">매출</th></tr></thead><tbody>';
   c.topB.slice(0,10).forEach((b,i) => {{
-    html += `<tr><td>${{i+1}}</td><td>${{b.buyer}}</td><td class="text-right">${{b.orders}}</td><td class="text-right">${{b.items}}</td><td class="text-right" style="font-weight:500">${{fmtW(b.revenue)}}</td></tr>`;
+    html += `<tr style="cursor:pointer" onclick="renderBuyerDetail('${{b.buyer}}');document.querySelectorAll('#topBuyersTable tbody tr').forEach(r=>r.style.background='');this.style.background='#fff7f5'"><td>${{i+1}}</td><td style="font-weight:500">${{b.buyer}}</td><td class="text-right">${{b.orders}}</td><td class="text-right">${{fmtW(b.revenue)}}</td></tr>`;
   }});
   html += '</tbody></table>';
   document.getElementById('topBuyersTable').innerHTML = html;
@@ -1368,6 +1537,8 @@ function renderAll() {{
 }}
 
 renderAll();
+renderCohortChart();
+renderCohortHeatmap();
 </script>
 </body>
 </html>'''

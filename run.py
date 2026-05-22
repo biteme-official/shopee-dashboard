@@ -10,7 +10,7 @@ from dashboard import generate_dashboard
 
 
 def main():
-    days = 30
+    days = 90
     if len(sys.argv) > 1:
         try:
             days = int(sys.argv[1])
