@@ -29,18 +29,22 @@ jobs:
           SHOPEE_PARTNER_KEY: ${{ secrets.SHOPEE_PARTNER_KEY }}
           SHOPEE_SHOP_ID: ${{ secrets.SHOPEE_SHOP_ID }}
         run: |
-          cat > config.py << EOF
-          PARTNER_ID = ${SHOPEE_PARTNER_ID}
-          PARTNER_KEY = "${SHOPEE_PARTNER_KEY}"
-          SHOP_ID = ${SHOPEE_SHOP_ID}
+          cat > config.py <<'PYEOF'
+          PARTNER_ID = __PID__
+          PARTNER_KEY = "__PKEY__"
+          SHOP_ID = __SID__
           HOST = "https://partner.shopeemobile.com"
           TOKEN_FILE = "shopee_tokens.json"
-          EOF
+          PYEOF
+          sed -i "s/__PID__/${SHOPEE_PARTNER_ID}/" config.py
+          sed -i "s/__PKEY__/${SHOPEE_PARTNER_KEY}/" config.py
+          sed -i "s/__SID__/${SHOPEE_SHOP_ID}/" config.py
+          sed -i 's/^          //' config.py
 
       - name: Restore tokens
         env:
           SHOPEE_TOKENS: ${{ secrets.SHOPEE_TOKENS_JSON }}
-        run: echo "$SHOPEE_TOKENS" > shopee_tokens.json
+        run: printf '%s' "$SHOPEE_TOKENS" > shopee_tokens.json
 
       - name: Restore snapshots
         env:
@@ -48,7 +52,7 @@ jobs:
         run: |
           mkdir -p output
           if [ -n "$SNAPSHOTS" ]; then
-            echo "$SNAPSHOTS" > output/shopee_snapshots.json
+            printf '%s' "$SNAPSHOTS" > output/shopee_snapshots.json
           fi
 
       - name: Run collector + dashboard
