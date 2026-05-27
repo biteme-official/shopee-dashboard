@@ -78,20 +78,25 @@ jobs:
 
           PAYLOAD=$(cat <<EOF
           {
-            "blocks": [
+            "attachments": [
               {
-                "type": "header",
-                "text": { "type": "plain_text", "text": "🚀 Production 배포 — ${REPO}" }
-              },
-              { "type": "divider" },
-              {
-                "type": "section",
-                "text": { "type": "mrkdwn", "text": "*변경 내역:*\n$(echo -e "$CHANGE_LINES")" }
-              },
-              {
-                "type": "context",
-                "elements": [
-                  { "type": "mrkdwn", "text": "배포자: *@${DEPLOYER}*  |  <https://github.com/${GITHUB_REPOSITORY}|GitHub>" }
+                "color": "#DC3545",
+                "blocks": [
+                  {
+                    "type": "header",
+                    "text": { "type": "plain_text", "text": "🚀 Production 배포 — ${REPO}" }
+                  },
+                  { "type": "divider" },
+                  {
+                    "type": "section",
+                    "text": { "type": "mrkdwn", "text": "*변경 내역:*\n$(echo -e "$CHANGE_LINES")" }
+                  },
+                  {
+                    "type": "context",
+                    "elements": [
+                      { "type": "mrkdwn", "text": "배포자: *@${DEPLOYER}*  |  <https://github.com/${GITHUB_REPOSITORY}|GitHub>" }
+                    ]
+                  }
                 ]
               }
             ]

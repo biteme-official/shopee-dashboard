@@ -20,9 +20,27 @@ jobs:
           ACTOR="${{ github.actor }}"
           BRANCH_URL="https://github.com/${{ github.repository }}/tree/${{ github.event.ref }}"
 
-          MESSAGE="$(printf '🌱 브랜치 생성 — %s / %s\n👤 @%s\n🔗 %s' "$REPO" "$BRANCH" "$ACTOR" "$BRANCH_URL")"
+          PAYLOAD=$(cat <<EOF
+          {
+            "attachments": [
+              {
+                "color": "#0969DA",
+                "blocks": [
+                  {
+                    "type": "section",
+                    "text": { "type": "mrkdwn", "text": "*🌱 브랜치 생성 — ${REPO} / ${BRANCH}*" }
+                  },
+                  {
+                    "type": "context",
+                    "elements": [
+                      { "type": "mrkdwn", "text": "👤 @${ACTOR}  |  <${BRANCH_URL}|브랜치 보기>" }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+          EOF
+          )
 
-          PAYLOAD=$(jq -n --arg text "$MESSAGE" '{text: $text}')
-          curl -s -X POST -H 'Content-type: application/json' \
-            --data "$PAYLOAD" \
-            "$SLACK_WEBHOOK_URL"
+          curl -s -X POST -H 'Content-Type: application/json' -d "$PAYLOAD" "$SLACK_WEBHOOK_URL"
