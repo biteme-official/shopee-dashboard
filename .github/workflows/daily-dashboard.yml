@@ -91,7 +91,15 @@ jobs:
       - name: Copy latest dashboard to docs/
         run: |
           mkdir -p docs
-          LATEST=$(ls -t output/shopee_dashboard_*.html | head -1)
+          echo "=== output/ contents ==="
+          ls -la output/ || true
+          LATEST=$(find output -name "shopee_dashboard_*.html" -type f | sort -r | head -1)
+          if [ -z "$LATEST" ]; then
+            echo "No dashboard HTML found, listing all output files:"
+            find output -type f || true
+            exit 1
+          fi
+          echo "Copying $LATEST -> docs/index.html"
           cp "$LATEST" docs/index.html
 
       - name: Commit and push dashboard
