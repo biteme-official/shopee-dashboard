@@ -1,0 +1,83 @@
+name: Daily Dashboard Update
+
+on:
+  schedule:
+    - cron: '0 0 * * *'  # UTC 00:00 = KST 09:00
+  workflow_dispatch:        # 수동 실행 가능
+
+permissions:
+  contents: write
+
+jobs:
+  update-dashboard:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install requests pandas numpy
+
+      - name: Create config.py from secrets
+        env:
+          SHOPEE_PARTNER_ID: ${{ secrets.SHOPEE_PARTNER_ID }}
+          SHOPEE_PARTNER_KEY: ${{ secrets.SHOPEE_PARTNER_KEY }}
+          SHOPEE_SHOP_ID: ${{ secrets.SHOPEE_SHOP_ID }}
+        run: |
+          cat > config.py << EOF
+          PARTNER_ID = ${SHOPEE_PARTNER_ID}
+          PARTNER_KEY = "${SHOPEE_PARTNER_KEY}"
+          SHOP_ID = ${SHOPEE_SHOP_ID}
+          HOST = "https://partner.shopeemobile.com"
+          TOKEN_FILE = "shopee_tokens.json"
+          EOF
+
+      - name: Restore tokens
+        env:
+          SHOPEE_TOKENS: ${{ secrets.SHOPEE_TOKENS_JSON }}
+        run: echo "$SHOPEE_TOKENS" > shopee_tokens.json
+
+      - name: Restore snapshots
+        env:
+          SNAPSHOTS: ${{ secrets.SHOPEE_SNAPSHOTS_JSON }}
+        run: |
+          mkdir -p output
+          if [ -n "$SNAPSHOTS" ]; then
+            echo "$SNAPSHOTS" > output/shopee_snapshots.json
+          fi
+
+      - name: Run collector + dashboard
+        run: python run.py 30
+
+      - name: Update tokens secret
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT }}
+        run: |
+          gh secret set SHOPEE_TOKENS_JSON --repo biteme-official/shopee-dashboard < shopee_tokens.json
+
+      - name: Update snapshots secret
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT }}
+        run: |
+          gh secret set SHOPEE_SNAPSHOTS_JSON --repo biteme-official/shopee-dashboard < output/shopee_snapshots.json
+
+      - name: Copy latest dashboard to docs/
+        run: |
+          mkdir -p docs
+          LATEST=$(ls -t output/shopee_dashboard_*.html | head -1)
+          cp "$LATEST" docs/index.html
+
+      - name: Commit and push dashboard
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add docs/index.html
+          git diff --cached --quiet && echo "No changes" || {
+            git commit -m "chore: 대시보드 자동 갱신 $(date -u +%Y-%m-%d)"
+            git push
+          }
