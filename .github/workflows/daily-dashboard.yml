@@ -23,37 +23,56 @@ jobs:
       - name: Install dependencies
         run: pip install requests pandas numpy
 
-      - name: Create config.py from secrets
+      - name: Create config.py
         env:
           SHOPEE_PARTNER_ID: ${{ secrets.SHOPEE_PARTNER_ID }}
           SHOPEE_PARTNER_KEY: ${{ secrets.SHOPEE_PARTNER_KEY }}
           SHOPEE_SHOP_ID: ${{ secrets.SHOPEE_SHOP_ID }}
         run: |
-          cat > config.py <<'PYEOF'
-          PARTNER_ID = __PID__
-          PARTNER_KEY = "__PKEY__"
-          SHOP_ID = __SID__
-          HOST = "https://partner.shopeemobile.com"
-          TOKEN_FILE = "shopee_tokens.json"
+          python3 << 'PYEOF'
+          import os
+          pid = os.environ["SHOPEE_PARTNER_ID"]
+          pkey = os.environ["SHOPEE_PARTNER_KEY"]
+          sid = os.environ["SHOPEE_SHOP_ID"]
+          lines = [
+              f"PARTNER_ID = {pid}",
+              f'PARTNER_KEY = "{pkey}"',
+              f"SHOP_ID = {sid}",
+              'HOST = "https://partner.shopeemobile.com"',
+              'TOKEN_FILE = "shopee_tokens.json"',
+          ]
+          with open("config.py", "w") as f:
+              f.write("\n".join(lines) + "\n")
           PYEOF
-          sed -i "s/__PID__/${SHOPEE_PARTNER_ID}/" config.py
-          sed -i "s/__PKEY__/${SHOPEE_PARTNER_KEY}/" config.py
-          sed -i "s/__SID__/${SHOPEE_SHOP_ID}/" config.py
-          sed -i 's/^          //' config.py
+          cat config.py
 
       - name: Restore tokens
         env:
           SHOPEE_TOKENS: ${{ secrets.SHOPEE_TOKENS_JSON }}
-        run: printf '%s' "$SHOPEE_TOKENS" > shopee_tokens.json
+        run: |
+          python3 << 'PYEOF'
+          import os
+          tokens = os.environ["SHOPEE_TOKENS"]
+          with open("shopee_tokens.json", "w") as f:
+              f.write(tokens)
+          PYEOF
+          python3 -c "import json; json.load(open('shopee_tokens.json')); print('tokens OK')"
 
       - name: Restore snapshots
         env:
           SNAPSHOTS: ${{ secrets.SHOPEE_SNAPSHOTS_JSON }}
         run: |
           mkdir -p output
-          if [ -n "$SNAPSHOTS" ]; then
-            printf '%s' "$SNAPSHOTS" > output/shopee_snapshots.json
-          fi
+          python3 << 'PYEOF'
+          import os
+          s = os.environ.get("SNAPSHOTS", "")
+          if s:
+              with open("output/shopee_snapshots.json", "w") as f:
+                  f.write(s)
+              print("snapshots restored")
+          else:
+              print("no snapshots to restore")
+          PYEOF
 
       - name: Run collector + dashboard
         run: python run.py 30
@@ -61,14 +80,12 @@ jobs:
       - name: Update tokens secret
         env:
           GH_TOKEN: ${{ secrets.GH_PAT }}
-        run: |
-          gh secret set SHOPEE_TOKENS_JSON --repo biteme-official/shopee-dashboard < shopee_tokens.json
+        run: gh secret set SHOPEE_TOKENS_JSON --repo biteme-official/shopee-dashboard < shopee_tokens.json
 
       - name: Update snapshots secret
         env:
           GH_TOKEN: ${{ secrets.GH_PAT }}
-        run: |
-          gh secret set SHOPEE_SNAPSHOTS_JSON --repo biteme-official/shopee-dashboard < output/shopee_snapshots.json
+        run: gh secret set SHOPEE_SNAPSHOTS_JSON --repo biteme-official/shopee-dashboard < output/shopee_snapshots.json
 
       - name: Copy latest dashboard to docs/
         run: |
