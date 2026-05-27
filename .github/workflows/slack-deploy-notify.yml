@@ -2,7 +2,7 @@ name: Slack Deploy Notify
 
 on:
   push:
-    branches: [master]
+    branches: [main]
 
 jobs:
   notify:
