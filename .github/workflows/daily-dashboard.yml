@@ -51,12 +51,13 @@ jobs:
           SHOPEE_TOKENS: ${{ secrets.SHOPEE_TOKENS_JSON }}
         run: |
           python3 << 'PYEOF'
-          import os
+          import os, codecs
           tokens = os.environ["SHOPEE_TOKENS"]
-          with open("shopee_tokens.json", "w") as f:
+          tokens = tokens.lstrip(codecs.BOM_UTF8.decode("utf-8")).strip()
+          with open("shopee_tokens.json", "w", encoding="utf-8") as f:
               f.write(tokens)
           PYEOF
-          python3 -c "import json; json.load(open('shopee_tokens.json')); print('tokens OK')"
+          python3 -c "import json; d=json.load(open('shopee_tokens.json')); print('tokens OK, keys:', list(d.keys()))"
 
       - name: Restore snapshots
         env:
