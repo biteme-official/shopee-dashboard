@@ -24,9 +24,27 @@ jobs:
           PR_AUTHOR="${{ github.event.pull_request.user.login }}"
           PR_URL="${{ github.event.pull_request.html_url }}"
 
-          MESSAGE="$(printf '🔄 %s / %s\n변경 내역:\n• #%s %s (@%s)\n\n🔗 %s' "$REPO" "$BRANCH" "$PR_NUMBER" "$PR_TITLE" "$PR_AUTHOR" "$PR_URL")"
+          PAYLOAD=$(cat <<EOF
+          {
+            "attachments": [
+              {
+                "color": "#6C757D",
+                "blocks": [
+                  {
+                    "type": "section",
+                    "text": { "type": "mrkdwn", "text": "*🔄 ${REPO} / ${BRANCH}*\n• #${PR_NUMBER} ${PR_TITLE} (@${PR_AUTHOR})" }
+                  },
+                  {
+                    "type": "context",
+                    "elements": [
+                      { "type": "mrkdwn", "text": "<${PR_URL}|PR 보기>" }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+          EOF
+          )
 
-          PAYLOAD=$(jq -n --arg text "$MESSAGE" '{text: $text}')
-          curl -s -X POST -H 'Content-type: application/json' \
-            --data "$PAYLOAD" \
-            "$SLACK_WEBHOOK_URL"
+          curl -s -X POST -H 'Content-Type: application/json' -d "$PAYLOAD" "$SLACK_WEBHOOK_URL"
