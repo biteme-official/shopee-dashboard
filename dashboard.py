@@ -51,10 +51,12 @@ def process_data(raw):
     total_fees = 0
     total_escrow = 0
 
+    total_net_sales_krw = 0
     for o in orders:
         total_orders_set.add(o['order_sn'])
         total_revenue += (o.get('discounted_price') or o.get('original_price', 0)) * o.get('quantity', 0)
         total_items_sold += o.get('quantity', 0)
+        total_net_sales_krw += int(float(o.get('net_sales_krw') or 0))
 
     for e in escrow.values():
         total_fees += abs(e.get('commission_fee', 0)) + abs(e.get('service_fee', 0)) + abs(e.get('seller_transaction_fee', 0))
@@ -72,10 +74,11 @@ def process_data(raw):
         'fee_rate': round(fee_rate, 1), 'total_fees': round(total_fees),
         'total_escrow': round(total_escrow),
         'refund_count': refund_count, 'refund_rate': round(refund_rate, 1),
+        'total_net_sales_krw': total_net_sales_krw,
     }
 
     # === Daily timeline ===
-    daily = defaultdict(lambda: {'revenue': 0, 'orders': set(), 'items': 0})
+    daily = defaultdict(lambda: {'revenue': 0, 'orders': set(), 'items': 0, 'net_krw': 0})
     for o in orders:
         d = ts_to_date(o.get('create_time'))
         if not d: continue
@@ -83,6 +86,7 @@ def process_data(raw):
         daily[d]['revenue'] += rev
         daily[d]['orders'].add(o['order_sn'])
         daily[d]['items'] += o.get('quantity', 0)
+        daily[d]['net_krw'] += int(o.get('net_sales_krw', 0) or 0)
 
     timeline = []
     for d in sorted(daily.keys()):
@@ -90,6 +94,7 @@ def process_data(raw):
         timeline.append({
             'date': d, 'revenue': round(daily[d]['revenue']),
             'orders': n_orders, 'items': daily[d]['items'],
+            'net_krw': daily[d]['net_krw'],
             'aov': round(daily[d]['revenue'] / n_orders) if n_orders else 0,
         })
 
@@ -359,6 +364,9 @@ def process_data(raw):
             'ship_buyer': esc.get('buyer_shipping_fee', 0),
             'ship_actual': esc.get('actual_shipping_fee', 0),
             'ship_rebate': esc.get('shipping_rebate', 0),
+            'net_krw': int(float(o.get('net_sales_krw') or 0)),
+            'rev_krw': int(float(o.get('revenue_krw') or 0)),
+            'actual_qty': int(float(o.get('actual_quantity') or o.get('quantity', 0))),
         })
 
     return {
@@ -546,8 +554,8 @@ canvas{{max-height:260px}}
     <div class="section-label"><span>매출 · 주문 추이</span></div>
     <div class="card" style="margin-bottom:16px">
       <div class="card-header" style="display:flex;justify-content:space-between;align-items:center">
-        <div><div class="card-title">트래픽 · 주문 · 매출 추이</div>
-        <div class="card-desc">매출(막대) / 주문수(라인)</div></div>
+        <div><div class="card-title">거래액 · 주문 추이</div>
+        <div class="card-desc">거래액(막대) / 주문수(라인)</div></div>
       </div>
       <div class="card-body"><canvas id="timelineChart"></canvas></div>
     </div>
@@ -743,11 +751,12 @@ function aggFromRows(rows) {{
   const sns = new Set(rows.map(o => o.sn));
   const ord = sns.size;
   const items = rows.reduce((s,o) => s + o.qty, 0);
-  const aov = ord > 0 ? Math.round(rev/ord) : 0;
   const fees = rows.reduce((s,o) => s + Math.abs(o.comm) + Math.abs(o.svc) + Math.abs(o.txn), 0);
   const escrow = rows.reduce((s,o) => s + o.esc_amt, 0);
   const feeRate = rev > 0 ? (fees/rev*100).toFixed(1) : '0.0';
-  return {{ rev, ord, items, aov, fees: Math.round(fees), escrow: Math.round(escrow), feeRate }};
+  const net_krw = rows.reduce((s,o) => s + (o.net_krw||0), 0);
+  const aov = ord > 0 ? Math.round(net_krw/ord) : 0;
+  return {{ rev, ord, items, aov, fees: Math.round(fees), escrow: Math.round(escrow), feeRate, net_krw: Math.round(net_krw) }};
 }}
 
 // === Tab switching ===
@@ -781,9 +790,9 @@ function renderKPI() {{
   const a = aggFromRows(rows);
 
   document.getElementById('kpiArea').innerHTML = `
-    <div class="kpi accent"><div class="kpi-label">총 매출</div><div class="kpi-value">${{fmtW(Math.round(a.rev))}}</div><div class="kpi-sub">${{fmt(a.ord)}}건 주문</div></div>
+    <div class="kpi accent"><div class="kpi-label">거래액</div><div class="kpi-value">${{fmtW(a.net_krw)}}</div><div class="kpi-sub">배송비·바우처·적립금 반영</div></div>
     <div class="kpi accent"><div class="kpi-label">주문 수</div><div class="kpi-value">${{fmt(a.ord)}}건</div><div class="kpi-sub">${{fmt(a.items)}}개 판매</div></div>
-    <div class="kpi accent"><div class="kpi-label">평균 주문금액</div><div class="kpi-value">${{fmtW(a.aov)}}</div></div>
+    <div class="kpi"><div class="kpi-label">평균 주문금액</div><div class="kpi-value">${{fmtW(a.aov)}}</div><div class="kpi-sub">거래액 기준</div></div>
     <div class="kpi"><div class="kpi-label">수수료율</div><div class="kpi-value">${{a.feeRate}}%</div><div class="kpi-sub">${{fmtW(a.fees)}}</div></div>
     <div class="kpi"><div class="kpi-label">에스크로</div><div class="kpi-value">${{fmtW(a.escrow)}}</div><div class="kpi-sub">수수료 후 정산</div></div>
     <div class="kpi"><div class="kpi-label">환불률</div><div class="kpi-value">${{RAW.kpi.refund_rate}}%</div><div class="kpi-sub">${{RAW.kpi.refund_count}}건</div></div>
@@ -794,21 +803,21 @@ function renderTimelineChart() {{
   destroyChart('timeline');
   if (currentDays === 1) {{
     const rows = getFilteredRows();
-    const hourly = Array.from({{length:24}}, () => ({{orders: new Set(), revenue: 0}}));
+    const hourly = Array.from({{length:24}}, () => ({{orders: new Set(), net_krw: 0}}));
     rows.forEach(o => {{
       if (o.h == null) return;
       hourly[o.h].orders.add(o.sn);
-      hourly[o.h].revenue += (o.disc || o.orig) * o.qty;
+      hourly[o.h].net_krw += (o.net_krw || 0);
     }});
     const labels = Array.from({{length:24}}, (_, i) => i + '시');
-    const revData = hourly.map(h => Math.round(h.revenue));
+    const revData = hourly.map(h => Math.round(h.net_krw));
     const ordData = hourly.map(h => h.orders.size);
     charts.timeline = new Chart(document.getElementById('timelineChart'), {{
       type: 'bar',
       data: {{
         labels,
         datasets: [
-          {{ label: '매출', data: revData, backgroundColor: BRAND+'b3', borderRadius: 3, yAxisID: 'y', order: 2 }},
+          {{ label: '거래액', data: revData, backgroundColor: BRAND+'b3', borderRadius: 3, yAxisID: 'y', order: 2 }},
           {{ label: '주문수', data: ordData, type: 'line', borderColor: '#94a3b8', pointRadius: 2, tension: .3, yAxisID: 'y1', order: 1 }},
         ]
       }},
@@ -824,7 +833,7 @@ function renderTimelineChart() {{
       data: {{
         labels: tl.map(d => d.date.slice(5)),
         datasets: [
-          {{ label: '매출', data: tl.map(d => d.revenue), backgroundColor: BRAND+'b3', borderRadius: 3, yAxisID: 'y', order: 2 }},
+          {{ label: '거래액', data: tl.map(d => d.net_krw||0), backgroundColor: BRAND+'b3', borderRadius: 3, yAxisID: 'y', order: 2 }},
           {{ label: '주문수', data: tl.map(d => d.orders), type: 'line', borderColor: '#94a3b8', pointRadius: 2, tension: .3, yAxisID: 'y1', order: 1 }},
         ]
       }},
@@ -850,29 +859,29 @@ function renderTimelineTable() {{
       const key = dt.toISOString().slice(0,10);
       const end = new Date(dt); end.setDate(end.getDate()+6);
       const label = key.slice(5) + '~' + end.toISOString().slice(5,10);
-      if (!map.has(key)) map.set(key, {{label, revenue:0, orders:0, items:0}});
-      const r = map.get(key); r.revenue += d.revenue; r.orders += d.orders; r.items += d.items;
+      if (!map.has(key)) map.set(key, {{label, revenue:0, orders:0, items:0, net_krw:0}});
+      const r = map.get(key); r.revenue += d.revenue; r.orders += d.orders; r.items += d.items; r.net_krw += (d.net_krw||0);
     }});
     rows = [...map.values()];
   }} else {{
     const map = new Map();
     tl.forEach(d => {{
       const key = d.date.slice(0,7);
-      if (!map.has(key)) map.set(key, {{label:key, revenue:0, orders:0, items:0}});
-      const r = map.get(key); r.revenue += d.revenue; r.orders += d.orders; r.items += d.items;
+      if (!map.has(key)) map.set(key, {{label:key, revenue:0, orders:0, items:0, net_krw:0}});
+      const r = map.get(key); r.revenue += d.revenue; r.orders += d.orders; r.items += d.items; r.net_krw += (d.net_krw||0);
     }});
     rows = [...map.values()];
   }}
 
-  const totals = rows.reduce((a,r) => ({{revenue:a.revenue+r.revenue,orders:a.orders+r.orders,items:a.items+r.items}}), {{revenue:0,orders:0,items:0}});
+  const totals = rows.reduce((a,r) => ({{revenue:a.revenue+r.revenue,orders:a.orders+r.orders,items:a.items+r.items,net_krw:a.net_krw+(r.net_krw||0)}}), {{revenue:0,orders:0,items:0,net_krw:0}});
 
-  let html = '<table><thead><tr><th>날짜</th><th class="text-right">주문 수</th><th class="text-right">판매수량</th><th class="text-right">매출</th><th class="text-right">AOV</th></tr></thead><tbody>';
+  let html = '<table><thead><tr><th>날짜</th><th class="text-right">주문 수</th><th class="text-right">판매수량</th><th class="text-right">거래액</th><th class="text-right">AOV</th></tr></thead><tbody>';
   rows.forEach(r => {{
-    const aov = r.orders > 0 ? Math.round(r.revenue/r.orders) : 0;
-    html += `<tr><td style="font-family:monospace">${{r.label}}</td><td class="text-right">${{r.orders > 0 ? r.orders+'건' : '—'}}</td><td class="text-right">${{r.items > 0 ? fmt(r.items) : '—'}}</td><td class="text-right" style="font-weight:500">${{r.revenue > 0 ? fmtW(r.revenue) : '—'}}</td><td class="text-right">${{aov > 0 ? fmtW(aov) : '—'}}</td></tr>`;
+    const aov = r.orders > 0 ? Math.round((r.net_krw||0)/r.orders) : 0;
+    html += `<tr><td style="font-family:monospace">${{r.label}}</td><td class="text-right">${{r.orders > 0 ? r.orders+'건' : '—'}}</td><td class="text-right">${{r.items > 0 ? fmt(r.items) : '—'}}</td><td class="text-right" style="font-weight:600;color:var(--brand)">${{r.net_krw > 0 ? fmtW(r.net_krw) : '—'}}</td><td class="text-right">${{aov > 0 ? fmtW(aov) : '—'}}</td></tr>`;
   }});
-  const tAov = totals.orders > 0 ? Math.round(totals.revenue/totals.orders) : 0;
-  html += `</tbody><tfoot><tr><td>합계</td><td class="text-right">${{totals.orders}}건</td><td class="text-right">${{fmt(totals.items)}}</td><td class="text-right">${{fmtW(totals.revenue)}}</td><td class="text-right">${{fmtW(tAov)}}</td></tr></tfoot></table>`;
+  const tAov = totals.orders > 0 ? Math.round(totals.net_krw/totals.orders) : 0;
+  html += `</tbody><tfoot><tr><td>합계</td><td class="text-right">${{totals.orders}}건</td><td class="text-right">${{fmt(totals.items)}}</td><td class="text-right" style="color:var(--brand)">${{fmtW(totals.net_krw||0)}}</td><td class="text-right">${{fmtW(tAov)}}</td></tr></tfoot></table>`;
   document.getElementById('timelineTable').innerHTML = html;
 }}
 

@@ -16,6 +16,19 @@ from config import PARTNER_ID, PARTNER_KEY, SHOP_ID, HOST, TOKEN_FILE
 
 KST = timezone(timedelta(hours=9))
 
+STATUS_MAP = {
+    'UNPAID': '결제 대기',
+    'READY_TO_SHIP': '발송 준비',
+    'RETRY_SHIP': '재발송',
+    'SHIPPED': '배송중',
+    'TO_CONFIRM_RECEIVE': '배송 완료',
+    'IN_CANCEL': '취소 요청',
+    'CANCELLED': '구매 취소',
+    'COMPLETED': '구매 확정',
+    'INVOICE_PENDING': '청구 대기',
+}
+KRW_RATE = 1125
+
 
 def make_sign(path, timestamp, access_token=None, shop_id=None):
     if access_token and shop_id:
@@ -232,9 +245,11 @@ def collect_orders(access_token, days_back=30):
         buyer_username = order.get('buyer_username', '')
 
         for item in order.get('item_list', []):
+            orig = item.get('model_original_price', 0)
+            disc = item.get('model_discounted_price', 0)
             rows.append({
                 'order_sn': order_sn,
-                'order_status': order_status,
+                'order_status': STATUS_MAP.get(order_status, order_status),
                 'create_time': create_time,
                 'pay_time': pay_time,
                 'payment_method': payment_method,
@@ -243,9 +258,11 @@ def collect_orders(access_token, days_back=30):
                 'item_name': item.get('item_name', ''),
                 'model_name': item.get('model_name', ''),
                 'model_sku': item.get('model_sku', ''),
-                'original_price': item.get('model_original_price', 0),
-                'discounted_price': item.get('model_discounted_price', 0),
+                'original_price': orig,
+                'unit_discounted_price': round(orig - disc, 2),
+                'discounted_price': disc,
                 'quantity': item.get('model_quantity_purchased', 0),
+                'refund_count': item.get('refund_count', 0),
             })
 
     print(f"  -> {len(rows)} line items")
@@ -273,7 +290,13 @@ def collect_escrow(access_token, order_sns):
                 'final_shipping_gst': order_income.get('final_escrow_shipping_gst', 0),
                 'actual_shipping_fee': order_income.get('actual_shipping_fee', 0),
                 'shipping_rebate': order_income.get('shopee_shipping_rebate', 0),
+                'order_income_escrow_amount_after_adjustment': order_income.get('escrow_amount_after_adjustment', 0),
                 'buyer_shipping_fee': buyer_payment.get('shipping_fee', 0),
+                'buyer_payment_info_shipping_fee': buyer_payment.get('shipping_fee', 0),
+                'buyer_payment_info_seller_voucher': buyer_payment.get('seller_voucher', 0),
+                'buyer_payment_info_shopee_voucher': buyer_payment.get('shopee_voucher', 0),
+                'buyer_payment_info_shopee_coins_redeemed': buyer_payment.get('shopee_coins_redeemed', 0),
+                'buyer_payment_info_credit_card_promotion': buyer_payment.get('credit_card_promotion', 0),
             })
         time.sleep(0.2)
 
@@ -300,6 +323,55 @@ def collect_returns(access_token):
         })
     print(f"  -> {len(results)} returns")
     return results
+
+
+def calculate_metrics(df):
+    """orders + escrow 병합 DataFrame → 실매출(KRW) 지표 컬럼 추가 후 반환."""
+    df = df.copy()
+
+    # 1. 실수량
+    df['actual_quantity'] = df['quantity'] - df['refund_count'].fillna(0)
+
+    # 2. 매출액 (환불 반영)
+    cancelled = df['order_status'] == '구매 취소'
+    df['revenue_sgd'] = np.where(cancelled, 0.0, df['discounted_price'] * df['actual_quantity'])
+
+    # 3. 환불 이전 매출액
+    df['gross_revenue_sgd'] = np.where(cancelled, 0.0, df['discounted_price'] * df['quantity'])
+
+    # 4. 주문별 gross_revenue 합산 (안분 분모)
+    df['total_gross_revenue_sgd'] = df.groupby('order_sn')['gross_revenue_sgd'].transform('sum')
+
+    # 안분 비율 (분모 0 방어)
+    ratio = df['gross_revenue_sgd'] / df['total_gross_revenue_sgd'].replace(0, np.nan)
+
+    # 5. 공통 비용 항목 안분
+    df['shipping_fee_sgd']   = (df['buyer_payment_info_shipping_fee'] * ratio).round(2)
+    df['seller_voucher_sgd'] = (df['buyer_payment_info_seller_voucher'] * ratio).round(2)
+    df['shopee_voucher_sgd'] = (df['buyer_payment_info_shopee_voucher'] * ratio).round(2)
+    df['coins_redeemed_sgd'] = (df['buyer_payment_info_shopee_coins_redeemed'] * ratio).round(2)
+    df['card_promo_sgd']     = (df['buyer_payment_info_credit_card_promotion'] * ratio).round(2)
+
+    # 6. 실매출 (바우처·할인은 음수로 유입 → 덧셈 처리)
+    df['net_sales_sgd'] = (
+        df['revenue_sgd']
+        + df['shipping_fee_sgd']
+        + df['seller_voucher_sgd']
+        + df['shopee_voucher_sgd']
+        + df['coins_redeemed_sgd']
+        + df['card_promo_sgd']
+    ).round(2)
+
+    # 정산가: escrow_amount_after_adjustment 안분
+    df['escrow_amount_sgd'] = (df['order_income_escrow_amount_after_adjustment'] * ratio).round(2)
+
+    # 7. KRW 환산 (환율 고정 1125)
+    for col in ['revenue_sgd', 'gross_revenue_sgd', 'shipping_fee_sgd',
+                'seller_voucher_sgd', 'shopee_voucher_sgd', 'coins_redeemed_sgd',
+                'card_promo_sgd', 'net_sales_sgd', 'escrow_amount_sgd']:
+        df[col.replace('_sgd', '_krw')] = (df[col] * KRW_RATE).round(0).astype('Int64')
+
+    return df
 
 
 def collect_item_extra_info(access_token, item_ids):
@@ -510,6 +582,20 @@ def run_collection(days_back=30):
             snapshots = json.load(f)
     except (FileNotFoundError, json.JSONDecodeError):
         snapshots = {}
+
+    # 실매출 지표 계산 (JSON 저장 전에 orders 업데이트)
+    if orders and escrow:
+        df_orders = pd.DataFrame(orders)
+        df_escrow = pd.DataFrame(escrow)
+        df = df_orders.merge(df_escrow, on='order_sn', how='left')
+        df = calculate_metrics(df)
+
+        metrics_file = f"output/shopee_metrics_{datetime.now(KST).strftime('%Y%m%d')}.csv"
+        df.to_csv(metrics_file, index=False, encoding='utf-8-sig')
+        print(f"[DONE] Metrics CSV saved to {metrics_file}")
+
+        # pandas 타입 → Python 네이티브 타입으로 변환 후 orders 교체
+        orders = json.loads(df.fillna(0).to_json(orient='records'))
 
     data = {
         'collected_at': datetime.now(KST).strftime('%Y-%m-%d %H:%M:%S'),
