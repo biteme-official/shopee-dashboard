@@ -21,30 +21,15 @@ jobs:
           python-version: '3.11'
 
       - name: Install dependencies
-        run: pip install requests pandas numpy
+        run: pip install -r requirements.txt
 
-      - name: Create config.py
-        env:
-          SHOPEE_PARTNER_ID: ${{ secrets.SHOPEE_PARTNER_ID }}
-          SHOPEE_PARTNER_KEY: ${{ secrets.SHOPEE_PARTNER_KEY }}
-          SHOPEE_SHOP_ID: ${{ secrets.SHOPEE_SHOP_ID }}
+      - name: Create .env
         run: |
-          python3 << 'PYEOF'
-          import os
-          pid = os.environ["SHOPEE_PARTNER_ID"]
-          pkey = os.environ["SHOPEE_PARTNER_KEY"]
-          sid = os.environ["SHOPEE_SHOP_ID"]
-          lines = [
-              f"PARTNER_ID = {pid}",
-              f'PARTNER_KEY = "{pkey}"',
-              f"SHOP_ID = {sid}",
-              'HOST = "https://partner.shopeemobile.com"',
-              'TOKEN_FILE = "shopee_tokens.json"',
-          ]
-          with open("config.py", "w") as f:
-              f.write("\n".join(lines) + "\n")
-          PYEOF
-          cat config.py
+          cat > .env << EOF
+          SHOPEE_PARTNER_ID=${{ secrets.SHOPEE_PARTNER_ID }}
+          SHOPEE_PARTNER_KEY=${{ secrets.SHOPEE_PARTNER_KEY }}
+          SHOPEE_SHOP_ID=${{ secrets.SHOPEE_SHOP_ID }}
+          EOF
 
       - name: Restore tokens
         env:
