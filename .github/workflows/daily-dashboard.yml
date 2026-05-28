@@ -29,20 +29,8 @@ jobs:
           SHOPEE_PARTNER_ID=${{ secrets.SHOPEE_PARTNER_ID }}
           SHOPEE_PARTNER_KEY=${{ secrets.SHOPEE_PARTNER_KEY }}
           SHOPEE_SHOP_ID=${{ secrets.SHOPEE_SHOP_ID }}
+          SHOPEE_TOKENS_JSON=${{ secrets.SHOPEE_TOKENS_JSON }}
           EOF
-
-      - name: Restore tokens
-        env:
-          SHOPEE_TOKENS: ${{ secrets.SHOPEE_TOKENS_JSON }}
-        run: |
-          python3 << 'PYEOF'
-          import os, codecs
-          tokens = os.environ["SHOPEE_TOKENS"]
-          tokens = tokens.lstrip(codecs.BOM_UTF8.decode("utf-8")).strip()
-          with open("shopee_tokens.json", "w", encoding="utf-8") as f:
-              f.write(tokens)
-          PYEOF
-          python3 -c "import json; d=json.load(open('shopee_tokens.json')); print('tokens OK, keys:', list(d.keys()))"
 
       - name: Restore snapshots
         env:

@@ -6,6 +6,7 @@ Shopee API Data Collector
 import hmac
 import hashlib
 import time
+import os
 import requests
 import json
 import pandas as pd
@@ -29,8 +30,14 @@ def get_valid_access_token():
         with open(TOKEN_FILE, 'r') as f:
             tokens = json.load(f)
     except FileNotFoundError:
-        print("[ERROR] shopee_tokens.json not found")
-        return None
+        tokens_json = os.environ.get('SHOPEE_TOKENS_JSON', '')
+        if not tokens_json:
+            print("[ERROR] shopee_tokens.json not found and SHOPEE_TOKENS_JSON not set")
+            return None
+        tokens = json.loads(tokens_json.lstrip('﻿').strip())
+        with open(TOKEN_FILE, 'w', encoding='utf-8') as f:
+            json.dump(tokens, f)
+        print(f"[TOKEN] Created {TOKEN_FILE} from env var")
 
     now = int(time.time())
     if now > (tokens.get('expire_time', 0) - 600):
